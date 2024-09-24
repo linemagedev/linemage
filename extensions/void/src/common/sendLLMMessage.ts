@@ -1,31 +1,47 @@
-import Anthropic from '@anthropic-ai/sdk';
-import OpenAI from 'openai';
-
-// import ollama from 'ollama'
+import { streamText } from 'ai'
+import { createOpenAI, OpenAIProviderSettings } from '@ai-sdk/openai';
+import { AnthropicProviderSettings, createAnthropic } from '@ai-sdk/anthropic';
+import { AzureOpenAIProviderSettings, createAzure } from '@ai-sdk/azure';
+import { createOllama, OllamaProviderSettings } from 'ollama-ai-provider';
 
 export type ApiConfig = {
+	/** @default 'anthropic' */
+	provider: 'anthropic' | 'openai' | 'azure' | 'greptile' | 'ollama'
 	anthropic: {
-		apikey: string,
+		/** @default 'claude-3-5-sonnet-20240620' */
+		model: string,
+		apiKey: string,
+		providerSettings?: Omit<AnthropicProviderSettings, 'apiKey'>
 	},
 	openai: {
-		apikey: string
+		/** @default 'gpt-4o' */
+		model: string,
+		apiKey: string,
+		providerSettings?: Omit<OpenAIProviderSettings, 'apiKey'>
+	},
+	azure: {
+		deploymentId: string,
+		resourceName: string,
+		apiKey: string,
+		providerSettings?: Omit<AzureOpenAIProviderSettings, 'apiKey' | 'resourceName'>
 	},
 	greptile: {
-		apikey: string,
-		githubPAT: string,
-		repoinfo: {
-			remote: string, // e.g. 'github'
-			repository: string, // e.g. 'voideditor/void'
-			branch: string // e.g. 'main'
+		apiKey: string,
+		providerSettings?: {
+			headers?: Record<string, string>,
+			repoinfo?: {
+				remote?: string, // e.g. 'github'
+				repository?: string, // e.g. 'voideditor/void'
+				branch?: string // e.g. 'main'
+			}[]
 		}
 	},
 	ollama: {
-		// TODO
+		/** @default 'llama3.1' */
+		model: string
+		providerSettings?: OllamaProviderSettings
 	},
-	whichApi: string
 }
-
-
 
 type OnText = (newText: string, fullText: string) => void
 
@@ -54,95 +70,6 @@ type SendLLMMessageFnTypeExternal = (params: {
 		abort: () => void
 	}
 
-
-
-
-// Claude
-const sendClaudeMsg: SendLLMMessageFnTypeInternal = ({ messages, onText, onFinalMessage, apiConfig }) => {
-
-
-	const anthropic = new Anthropic({ apiKey: apiConfig.anthropic.apikey, dangerouslyAllowBrowser: true }); // defaults to process.env["ANTHROPIC_API_KEY"]
-
-	const stream = anthropic.messages.stream({
-		model: "claude-3-5-sonnet-20240620",
-		max_tokens: 1024,
-		messages: messages,
-	});
-
-	let did_abort = false
-
-	// when receive text
-	stream.on('text', (newText, fullText) => {
-		if (did_abort) return
-		onText(newText, fullText)
-	})
-
-	// when we get the final message on this stream (or when error/fail)
-	stream.on('finalMessage', (claude_response) => {
-		if (did_abort) return
-		// stringify the response's content
-		let content = claude_response.content.map(c => { if (c.type === 'text') { return c.text } }).join('\n');
-		onFinalMessage(content)
-	})
-
-
-	// if abort is called, onFinalMessage is NOT called, and no later onTexts are called either
-	const abort = () => {
-		// stream.abort() // this doesnt appear to do anything, but it should try to stop claude from generating anymore
-		did_abort = true
-	}
-
-	return { abort }
-
-};
-
-
-
-
-// OpenAI
-const sendOpenAIMsg: SendLLMMessageFnTypeInternal = ({ messages, onText, onFinalMessage, apiConfig }) => {
-
-	let did_abort = false
-	let fullText = ''
-
-	// if abort is called, onFinalMessage is NOT called, and no later onTexts are called either
-	let abort: () => void = () => { did_abort = true }
-
-	const openai = new OpenAI({ apiKey: apiConfig.openai.apikey, dangerouslyAllowBrowser: true });
-
-	openai.chat.completions.create({
-		model: 'gpt-4o-2024-08-06',
-		messages: messages,
-		stream: true,
-	})
-		.then(async response => {
-			abort = () => {
-				// response.controller.abort() // this isn't needed now, to keep consistency with claude will leave it commented
-				did_abort = true;
-			}
-			// when receive text
-			try {
-				for await (const chunk of response) {
-					if (did_abort) return;
-					const newText = chunk.choices[0]?.delta?.content || '';
-					fullText += newText;
-					onText(newText, fullText);
-				}
-				onFinalMessage(fullText);
-			}
-			// when error/fail
-			catch (error) {
-				console.error('Error in OpenAI stream:', error);
-				onFinalMessage(fullText);
-			}
-			// when we get the final message on this stream
-			onFinalMessage(fullText)
-		})
-	return { abort };
-};
-
-
-
 // Greptile
 // https://docs.greptile.com/api-reference/query
 // https://docs.greptile.com/quickstart#sample-response-streamed
@@ -159,14 +86,14 @@ const sendGreptileMsg: SendLLMMessageFnTypeInternal = ({ messages, onText, onFin
 	fetch('https://api.greptile.com/v2/query', {
 		method: 'POST',
 		headers: {
-			"Authorization": `Bearer ${apiConfig.greptile.apikey}`,
-			"X-Github-Token": `${apiConfig.greptile.githubPAT}`,
+			"Authorization": `Bearer ${apiConfig.greptile.apiKey}`,
 			"Content-Type": `application/json`,
+			...apiConfig.greptile.providerSettings?.headers
 		},
 		body: JSON.stringify({
 			messages,
 			stream: true,
-			repositories: [apiConfig.greptile.repoinfo]
+			repositories: apiConfig.greptile.providerSettings?.repoinfo
 		}),
 	})
 		// this is {message}\n{message}\n{message}...\n
@@ -207,79 +134,54 @@ const sendGreptileMsg: SendLLMMessageFnTypeInternal = ({ messages, onText, onFin
 		.catch(e => {
 			console.error('Error in Greptile stream:', e);
 			onFinalMessage(fullText);
-
 		});
-
 	return { abort }
-
-
-
 }
 
 
 export const sendLLMMessage: SendLLMMessageFnTypeExternal = ({ messages, onText, onFinalMessage, apiConfig }) => {
 	if (!apiConfig) return { abort: () => { } }
-
-	const whichApi = apiConfig.whichApi
-
-	if (whichApi === 'anthropic') {
-		return sendClaudeMsg({ messages, onText, onFinalMessage, apiConfig })
-	}
-	else if (whichApi === 'openai') {
-		return sendOpenAIMsg({ messages, onText, onFinalMessage, apiConfig })
-	}
-	else if (whichApi === 'greptile') {
+	const provider = apiConfig.provider
+	// TODO: create an @ai-sdk provider for greptile
+	if (provider === 'greptile')
 		return sendGreptileMsg({ messages, onText, onFinalMessage, apiConfig })
-	}
-	else if (whichApi === 'ollama') {
-		return sendClaudeMsg({ messages, onText, onFinalMessage, apiConfig }) // TODO
-	}
-	else {
-		console.error(`Error: whichApi was ${whichApi}, which is not recognized!`)
-		return sendClaudeMsg({ messages, onText, onFinalMessage, apiConfig }) // TODO
-	}
 
+	const model = getAiModel(apiConfig)
+	const abortController = new AbortController()
+	const abortSignal = abortController.signal
+	streamText({
+		model,
+		messages,
+		abortSignal,
+	}).then(async (result) => {
+		let fullText = ''
+		for await (const textPart of result.textStream) {
+			fullText += textPart
+			onText(textPart, fullText)
+		}
+		onFinalMessage(fullText)
+	})
+
+	return { abort: abortController.abort }
 }
 
-
-// Ollama
-// const sendOllamaMsg: sendMsgFnType = ({ messages, onText, onFinalMessage }) => {
-
-//     let did_abort = false
-//     let fullText = ''
-
-//     // if abort is called, onFinalMessage is NOT called, and no later onTexts are called either
-//     let abort: () => void = () => {
-//         did_abort = true
-//     }
-
-//     ollama.chat({ model: 'llama3.1', messages: messages, stream: true })
-//         .then(async response => {
-
-//             abort = () => {
-//                 // response.abort() // this isn't needed now, to keep consistency with claude will leave it commented for now
-//                 did_abort = true;
-//             }
-
-//             // when receive text
-//             try {
-//                 for await (const part of response) {
-//                     if (did_abort) return
-//                     let newText = part.message.content
-//                     fullText += newText
-//                     onText(newText, fullText)
-//                 }
-//             }
-//             // when error/fail
-//             catch (e) {
-//                 onFinalMessage(fullText)
-//                 return
-//             }
-
-//             // when we get the final message on this stream
-//             onFinalMessage(fullText)
-//         })
-
-//     return { abort };
-// };
-
+export const getAiModel = (apiConfig: ApiConfig) => {
+	switch (apiConfig.provider) {
+		case 'openai': return createOpenAI({
+			...apiConfig.openai.providerSettings,
+			apiKey: apiConfig.openai.apiKey,
+		})(apiConfig.openai.model || 'gpt-4o')
+		case 'anthropic': return createAnthropic({
+			...apiConfig.anthropic.providerSettings,
+			apiKey: apiConfig.anthropic.apiKey,
+		})(apiConfig.anthropic.model || 'claude-3-5-sonnet-20240620')
+		case 'ollama': return createOllama(apiConfig.ollama.providerSettings)(apiConfig.ollama.model || 'llama3.1')
+		case 'azure': return createAzure({
+			...apiConfig.azure.providerSettings,
+			apiKey: apiConfig.azure.apiKey,
+			resourceName: apiConfig.azure.resourceName,
+		})(`${apiConfig.azure.deploymentId}`)
+		default:
+			throw new Error(`Error: provider was ${apiConfig.provider}, which is not recognized!`)
+	}
+}
