@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { WebviewMessage } from './shared_types';
+import { ChatThread, WebviewMessage } from './shared_types';
 import { CtrlKCodeLensProvider } from './CtrlKCodeLensProvider';
 import { getDiffedLines } from './getDiffedLines';
 import { ApprovalCodeLensProvider } from './ApprovalCodeLensProvider';
@@ -90,6 +90,14 @@ export function activate(context: vscode.ExtensionContext) {
 	webviewProvider.webview.then(
 		webview => {
 
+			// top navigation bar commands
+			context.subscriptions.push(vscode.commands.registerCommand('void.newChat', async () => {
+				webview.postMessage({ type: 'startNewChat' } satisfies WebviewMessage)
+			}))
+			context.subscriptions.push(vscode.commands.registerCommand('void.prevChats', async () => {
+				webview.postMessage({ type: 'showPreviousChats' } satisfies WebviewMessage)
+			}))
+
 			// when config changes, send it to the sidebar
 			vscode.workspace.onDidChangeConfiguration(e => {
 				if (e.affectsConfiguration('void')) {
@@ -130,6 +138,20 @@ export function activate(context: vscode.ExtensionContext) {
 
 					webview.postMessage({ type: 'apiConfig', apiConfig } satisfies WebviewMessage)
 
+				}
+				else if (m.type === 'getThreadHistory') {
+
+					const threads: ChatThread[] = context.workspaceState.get('threadHistory') ?? []
+					webview.postMessage({ type: 'threadHistory', threads } satisfies WebviewMessage)
+				}
+				else if (m.type === 'updateThread') {
+
+					const threads: ChatThread[] = context.workspaceState.get('threadHistory') as [] ?? []
+					const updatedThreads = threads.find((t: ChatThread) => t.id === m.thread.id)
+						? threads.map((t: ChatThread) => t.id === m.thread.id ? m.thread : t)
+						: [...threads, m.thread]
+					context.workspaceState.update('threadHistory', updatedThreads)
+					webview.postMessage({ type: 'threadHistory', threads: updatedThreads } satisfies WebviewMessage)
 				}
 				else {
 

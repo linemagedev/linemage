@@ -80,6 +80,15 @@
         "title": "Discard Diff"
       },
       {
+        "command": "void.newChat",
+        "title": "New chat",
+        "icon": "$(add)"
+      },
+      {
+        "command": "void.prevChats",
+        "title": "Previous chats",
+        "icon": "$(history)"
+      }, {
         "command": "void.openSettings",
         "title": "Void settings",
         "icon": "$(settings-gear)"
@@ -117,6 +126,16 @@
     ],
     "menus": {
       "view/title": [
+        {
+          "command": "void.newChat",
+          "when": "view == 'void.viewnumberone'",
+          "group": "navigation"
+        },
+        {
+          "command": "void.prevChats",
+          "when": "view == 'void.viewnumberone'",
+          "group": "navigation"
+        },
         {
           "command": "void.openSettings",
           "when": "view == 'void.viewnumberone'",
