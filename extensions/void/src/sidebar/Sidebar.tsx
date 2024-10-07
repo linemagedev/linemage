@@ -4,7 +4,7 @@ import { Command, File, Selection, WebviewMessage } from "../shared_types"
 import { awaitVSCodeResponse, getVSCodeAPI, resolveAwaitingVSCodeResponse } from "./getVscodeApi"
 
 import { marked } from 'marked';
-import MarkdownRender, { BlockCode } from "./MarkdownRender";
+import { MarkdownRender, BlockCode } from "./MarkdownRender";
 
 import * as vscode from 'vscode'
 
@@ -82,7 +82,7 @@ const ChatBubble = ({ chatMessage }: { chatMessage: ChatMessage }) => {
 	if (role === 'user') {
 		chatbubbleContents = <>
 			<IncludedFiles files={chatMessage.files} />
-			{chatMessage.selection?.selectionStr && <BlockCode text={chatMessage.selection.selectionStr} disableApplyButton={true} />}
+			{chatMessage.selection?.selectionStr && <BlockCode text={chatMessage.selection.selectionStr} hideToolbar />}
 			{children}
 		</>
 	}
@@ -278,7 +278,7 @@ const Sidebar = () => {
 								>
 									X
 								</button>
-								<BlockCode text={selection.selectionStr} disableApplyButton={true} />
+								<BlockCode text={selection.selectionStr} hideToolbar />
 							</div>
 						)}
 				</div>
